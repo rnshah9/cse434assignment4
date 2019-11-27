@@ -387,7 +387,7 @@ int main() {
                 }
             } else if (event == EVENT_NET_MUST_LOGIN_FIRST_ERROR) {
                 if (state == STATE_OFFLINE) {
-                    printf("Must login first!"\n);
+                    printf("Must login first!\n");
                 } else {
                     send_reset();
                 }
@@ -442,6 +442,7 @@ int main() {
                     clear_send_buffer();
                     token = 0;
                     state = STATE_OFFLINE;
+                    printf("logout_ack#successful\n");
                 } else {
                     send_reset();
                 }
