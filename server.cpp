@@ -52,7 +52,7 @@ struct session {
     time_t last_time;  // The last time when the server receives a message
                        // from this client.
     uint32_t token;    // The token of this session.
-    int state = 0;         // The state of this session, 0 is "OFFLINE", etc.
+    int state = 0;     // The state of this session, 0 is "OFFLINE", etc.
 
     // TODO: You may need to add more information such as the subscription
     // list, password, etc.
@@ -98,7 +98,8 @@ int main() {
     server_address.sin_addr.s_addr = inet_addr("127.0.0.1");
     server_address.sin_port = htons(32000);
 
-    bind(socket_file_descriptor, (struct sockaddr *)&server_address, sizeof(server_address));
+    bind(socket_file_descriptor, (struct sockaddr *)&server_address,
+         sizeof(server_address));
 
     // Same as that in the client code.
     struct header *ph_send = (struct header *)send_buffer;
@@ -111,9 +112,9 @@ int main() {
 
         len = sizeof(client_address);
         recv_len =
-            recvfrom(socket_file_descriptor,               // socket file descriptor
-                     recv_buffer,          // receive buffer
-                     sizeof(recv_buffer),  // number of bytes to be received
+            recvfrom(socket_file_descriptor,  // socket file descriptor
+                     recv_buffer,             // receive buffer
+                     sizeof(recv_buffer),     // number of bytes to be received
                      0,
                      (struct sockaddr *)&client_address,  // client address
                      &len);  // length of client address structure
@@ -180,8 +181,8 @@ int main() {
                 ph_send->token = 0;
             }
 
-            sendto(socket_file_descriptor, send_buffer, h_size, 0, (struct sockaddr *)&client_address,
-                   sizeof(client_address));
+            sendto(socket_file_descriptor, send_buffer, h_size, 0,
+                   (struct sockaddr *)&client_address, sizeof(client_address));
 
         } else if (event == EVENT_NET_POST) {
             // TODO: Check the state of the client that sends this post msg,
@@ -210,7 +211,8 @@ int main() {
                     ph_send->magic2 = MAGIC_2;
                     ph_send->opcode = OPCODE_FORWARD;
                     ph_send->payload_len = m;
-                    ph_send->message_id = 0;  // Note that I didn't use message_id here.
+                    ph_send->message_id =
+                        0;  // Note that I didn't use message_id here.
 
                     sendto(socket_file_descriptor, send_buffer, h_size, 0,
                            (struct sockaddr *)&target->client_addr,

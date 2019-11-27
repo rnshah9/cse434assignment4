@@ -98,7 +98,7 @@ void state_error(char *custom_message) {
 void send_reset() {
     state = STATE_OFFLINE;
     token = 0;
-    printf("Session destroyed.\n");
+    printf("Session destroyed due to unexpected state.\n");
 
     send_buffer_header->opcode = OPCODE_RESET;
     send_buffer_header->payload_len = 0;
@@ -106,6 +106,8 @@ void send_reset() {
     send_buffer_header->message_id = 0;
 
     send_send_buffer(header_size);
+    clear_send_buffer();
+    clear_recv_buffer();
 }
 
 int parse_user_event(char *user_input) {
@@ -240,6 +242,12 @@ void clear_send_buffer() {
     send_buffer_header->magic2 = MAGIC_2;
 }
 
+void clear_recv_buffer() {
+    memset(&recv_buffer, 0, sizeof(recv_buffer));
+    recv_buffer_header->magic1 = MAGIC_1;
+    recv_buffer_header->magic2 = MAGIC_2;
+}
+
 int main() {
     FD_ZERO(&read_set);
     socket_file_descriptor = socket(AF_INET, SOCK_DGRAM, 0);
@@ -283,12 +291,13 @@ int main() {
 
         select(maximum_file_descriptor, &read_set, NULL, NULL, NULL);
 
+        clear_recv_buffer();
+        clear_send_buffer();
+
         if (FD_ISSET(fileno(stdin), &read_set)) {
             fgets(user_input, sizeof(user_input), stdin);
             event = parse_user_event(user_input);
             printf("Event number is: %d\n", event);
-
-            clear_send_buffer();
 
             if (event == EVENT_USER_LOGIN) {
                 if (state == STATE_OFFLINE) {
@@ -376,17 +385,71 @@ int main() {
                 } else {
                     send_reset();
                 }
-            } 
-            else if (event == EVENT_NET_MUST_LOGIN_FIRST_ERROR) {
+            } else if (event == EVENT_NET_MUST_LOGIN_FIRST_ERROR) {
                 if (state == STATE_OFFLINE) {
                     printf("Must login first!"\n);
-                }
-                else {
+                } else {
                     send_reset();
                 }
+            } else if (event == EVENT_NET_POST_ACK) {
+                if (state == STATE_POST_SENT) {
+                    printf("post_ack#successful\n");
+                    state = STATE_ONLINE;
+                } else {
+                    send_reset();
+                }
+            } else if (event == EVENT_NET_SUBSCRIBE_ACK) {
+                if (state == STATE_SUBSCRIBE_SENT) {
+                    printf("subscribe_ack#%s\n",
+                           recv_buffer_header->opcode ==
+                                   OPCODE_SUCCESSFUL_SUBSCRIBE_ACK
+                               ? "successful"
+                               : "failed");
+                    state = STATE_ONLINE;
+                } else {
+                    send_reset();
+                }
+            } else if (event == EVENT_NET_UNSUBSCRIBE_ACK) {
+                if (state == STATE_UNSUBSCRIBE_SENT) {
+                    printf("unsubscribe_ack#%s\n",
+                           recv_buffer_header->opcode ==
+                                   OPCODE_SUCCESSFUL_UNSUBSCRIBE_ACK
+                               ? "successful"
+                               : "failed");
+                    state = STATE_ONLINE;
+                } else {
+                    send_reset();
+                }
+            } else if (event == EVENT_NET_RETRIEVE_ACK) {  // todo: check
+                if (state == STATE_RETRIEVE_SENT) {
+                    char payload[1024];
+                    memcpy(payload, recv_buffer + header_size,
+                           recv_buffer_header->payload_len);
+                    payload[recv_buffer_header->payload_len] = '\0';
+                    printf("%s\n", payload);
+                } else {
+                    send_reset();
+                }
+            } else if (event == EVENT_NET_END_RETRIEVE_ACK) {
+                if (state == STATE_RETRIEVE_SENT) {
+                    state = STATE_ONLINE;
+                } else {
+                    send_reset();
+                }
+            } else if (event == EVENT_NET_LOGOUT_ACK) {
+                if (state == STATE_LOGOUT_SENT) {
+                    clear_recv_buffer();
+                    clear_send_buffer();
+                    token = 0;
+                    state = STATE_OFFLINE;
+                } else {
+                    send_reset();
+                }
+            } else if (event == EVENT_NET_RESET) {
+                send_reset();
             }
             else if (event == EVENT_NET_INVALID) {
-                // TODO: Process other events.
+                printf("Invalid network event!\n");
             }
         }
 
