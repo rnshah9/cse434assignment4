@@ -16,7 +16,7 @@ struct header {
     char payload_len;
 
     uint32_t token;
-    uint32_t msg_id;
+    uint32_t message_id;
 };
 
 const int h_size = sizeof(struct header);
@@ -95,7 +95,7 @@ int main() {
     // keep receiving from.
     memset(&server_address, 0, sizeof(server_address));
     server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_address.sin_addr.s_addr = inet_addr("127.0.0.1");
     server_address.sin_port = htons(32000);
 
     bind(socket_file_descriptor, (struct sockaddr *)&server_address, sizeof(server_address));
@@ -160,7 +160,7 @@ int main() {
             ph_send->magic1 = MAGIC_1;
             ph_send->magic2 = MAGIC_2;
             ph_send->payload_len = 0;
-            ph_send->msg_id = 0;
+            ph_send->message_id = 0;
 
             int login_success = check_id_password(user_id, password);
             if (login_success > 0) {
@@ -210,7 +210,7 @@ int main() {
                     ph_send->magic2 = MAGIC_2;
                     ph_send->opcode = OPCODE_FORWARD;
                     ph_send->payload_len = m;
-                    ph_send->msg_id = 0;  // Note that I didn't use msg_id here.
+                    ph_send->message_id = 0;  // Note that I didn't use message_id here.
 
                     sendto(socket_file_descriptor, send_buffer, h_size, 0,
                            (struct sockaddr *)&target->client_addr,
