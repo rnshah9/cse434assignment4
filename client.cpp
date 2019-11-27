@@ -236,6 +236,14 @@ void send_logout_message() {
     send_send_buffer(header_size);
 }
 
+void send_forward_ack() {
+    send_buffer_header->opcode = OPCODE_FORWARD_ACK;
+    send_buffer_header->payload_len = 0;
+    send_buffer_header->token = token;
+    send_buffer_header->message_id = 0;
+    send_send_buffer(header_size);
+}
+
 void clear_send_buffer() {
     memset(&send_buffer, 0, sizeof(send_buffer));
     send_buffer_header->magic1 = MAGIC_1;
@@ -356,6 +364,8 @@ int main() {
             //     // -ing anything.
             // }
         }
+        clear_recv_buffer();
+        clear_send_buffer();
         if (FD_ISSET(socket_file_descriptor, &read_set)) {
             returned = recv(socket_file_descriptor, recv_buffer,
                             sizeof(recv_buffer), 0);
@@ -381,6 +391,7 @@ int main() {
                 if (state == STATE_ONLINE) {
                     char *text = recv_buffer + header_size;
                     printf("%s\n", text);
+                    send_forward_ack();
                     // Note that no state change is needed.
                 } else {
                     send_reset();
