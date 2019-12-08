@@ -217,6 +217,9 @@ void send_unsubscribe_message(char *user_input) {
     send_send_buffer(header_size + client_id_length);
 }
 void send_retrieve_message(char *user_input) {
+    char* newline = strchr(user_input, '\n');
+    *newline = '\0';
+    
     char *num_messages_string = user_input + strlen("retrieve#");
     int num_messages = atoi(num_messages_string);
 

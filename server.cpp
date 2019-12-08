@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <time.h>
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 using namespace std;
@@ -81,6 +82,7 @@ struct session {
 struct message {
     int message_id;
     char *content;
+    char *poster;
 };
 
 vector<message> message_list;
@@ -90,12 +92,13 @@ session master_sessions[16] = {0};
 int returned;
 int socket_file_descriptor;
 struct sockaddr_in server_address, client_address;
-char send_buffer[1024];
-char recv_buffer[1024];
+char send_buffer[1024] = {0};
+char recv_buffer[1024] = {0};
 struct header *send_buffer_header = (struct header *)send_buffer;
 struct header *recv_buffer_header = (struct header *)recv_buffer;
 int recv_length;
 socklen_t client_address_length;
+session *current_session;
 
 // TODO: You may need to add more structures to hold global information
 // such as all registered clients, the list of all posted messages, etc.
@@ -112,12 +115,277 @@ void clear_recv_buffer() {
     recv_buffer_header->magic2 = MAGIC_2;
 }
 
+void send_send_buffer(int num_bytes) {
+    sendto(socket_file_descriptor, send_buffer, num_bytes, 0,
+           (struct sockaddr *)&client_address, sizeof(client_address));
+}
+
 session *find_session_by_token(uint32_t token) {
-    if (session_map.find(token) != session_map.end()) {
-        return &session_map[token];
-    } else {
-        return NULL;
+    // if (session_map.find(token) != session_map.end()) {
+    //     return &session_map[token];
+    // } else {
+    //     return NULL;
+    // }
+    for (int i = 0; i <= 2; i++) {
+        if (master_sessions[i].token == token) {
+            return &master_sessions[i];
+        }
     }
+    return NULL;
+}
+
+uint32_t find_token_by_client_id(char *client_id) {
+    for (int i = 0; i <= 2; i++) {
+        if (!strcmp(master_sessions[i].client_id, client_id)) {
+            return master_sessions[i].token;
+        }
+    }
+    return 0;
+}
+
+void send_reset(session *sesh) {
+    sesh->state = STATE_OFFLINE;
+    sesh->token = 0;
+    printf("Session of client with id %s destroyed.\n", sesh->client_id);
+
+    send_buffer_header->opcode = OPCODE_RESET;
+    send_buffer_header->payload_len = 0;
+    send_buffer_header->token = token;
+    send_buffer_header->message_id = 0;
+
+    send_send_buffer(header_size);
+    clear_send_buffer();
+    clear_recv_buffer();
+}
+
+bool is_valid_token(uint32_t token) { return current_session->token == token; }
+
+void handle_login_event() {
+    char *id_password = recv_buffer + header_size;
+
+    char *ampersand = strchr(id_password, '&');
+    char *password = ampersand + 1;
+    *ampersand = '\0';  // Add a null terminator
+    // Note that this null terminator can break the user ID
+    // and the password without allocating other buffers.
+    char *user_id = id_password;
+
+    char *newline = strchr(password, '\n');
+    *newline = '\0';  // Add a null terminator
+    // Note that since we did not process it on the client side,
+    // and since it is always typed by a user, there must be a
+    // trailing new line. We just write a null terminator on this
+    // place to terminate the password string.
+
+    // The server need to reply a msg anyway, and this reply msg
+    // contains only the header
+    int master_session_index = identify_sessions(user_id, password);
+    if (master_session_index > -1) {
+        current_session = &master_sessions[master_session_index];
+        if (current_session->state != STATE_OFFLINE) {
+            send_reset(current_session);
+            return;
+        }
+
+        current_session->state = STATE_ONLINE;
+        current_session->token = send_buffer_header->token;
+        current_session->client_addr = client_address;
+
+        send_buffer_header->opcode = OPCODE_SUCCESSFUL_LOGIN_ACK;
+        send_buffer_header->token = generate_random_token();
+
+    } else {
+        current_session = NULL;
+
+        send_buffer_header->opcode = OPCODE_FAILED_LOGIN_ACK;
+        send_buffer_header->token = 0;
+    }
+
+    send_buffer_header->payload_len = 0;
+    send_buffer_header->message_id = 0;
+
+    send_send_buffer(header_size);
+}
+
+void handle_post_event() {
+    if (current_session->state != STATE_ONLINE) {
+        send_reset(current_session);
+        return;
+    }
+
+    char *text = recv_buffer + header_size;
+
+    char *newline = strchr(text, '\n');
+    *newline = '\0';
+    for (int i = 0; i <= 2; i++) {
+        session *target_session = &master_sessions[i];
+        vector<uint32_t> target_session_subscription_list_tokens =
+            target_session->subscription_list_tokens;
+        if (target_session->state == STATE_ONLINE &&
+            find(target_session_subscription_list_tokens.begin(),
+                 target_session_subscription_list_tokens.end(),
+                 current_session->token) !=
+                target_session_subscription_list_tokens.end()) {
+            char *payload = send_buffer + header_size;
+
+            // This formatting the "<client_a>some_text" in the payload
+            // of the forward msg, and hence, the client does not need
+            // to format it, i.e., the client can just print it out.
+            snprintf(payload, sizeof(send_buffer) - header_size, "<%s>%s",
+                     current_session->client_id, text);
+
+            // "target" is the session structure of the target client.
+            target_session->state = STATE_MSG_FORWARD;
+
+            send_buffer_header->opcode = OPCODE_FORWARD;
+            send_buffer_header->payload_len = strlen(payload);
+            send_buffer_header->message_id =
+                0;  // Note that I didn't use message_id here.
+
+            sendto(socket_file_descriptor, send_buffer, header_size, 0,
+                   (struct sockaddr *)&target_session->client_addr,
+                   sizeof(target_session->client_addr));
+        }
+    }
+
+    clear_send_buffer();
+    send_buffer_header->opcode = OPCODE_POST_ACK;
+    send_buffer_header->payload_len = 0;
+    send_buffer_header->message_id = 0;
+    send_send_buffer(header_size);
+
+    message msg;
+    strcpy(msg.content, text);
+    strcpy(msg.poster, current_session->client_id);
+
+    message_list.push_back(msg);
+}
+
+void handle_logout_event() {
+    if (current_session->state != STATE_ONLINE) {
+        send_reset(current_session);
+        return;
+    }
+
+    current_session->state = STATE_OFFLINE;
+    current_session->token = 0;
+
+    send_buffer_header->opcode = OPCODE_LOGOUT_ACK;
+    send_buffer_header->payload_len = 0;
+    send_buffer_header->message_id = 0;
+
+    send_send_buffer(header_size);
+}
+
+void handle_forward_ack() {
+    if (current_session->state != STATE_MSG_FORWARD) {
+        send_reset(current_session);
+        return;
+    }
+
+    current_session->state = STATE_ONLINE;
+}
+
+void handle_retrieve() {
+    if (current_session->state != STATE_ONLINE) {
+        send_reset(current_session);
+        return;
+    }
+
+    int num_messages_sent = 0;
+    int num_messages = recv_buffer_header->payload_len;
+
+    for (int i = message_list.size() - 1;
+         i >= 0 && num_messages_sent < num_messages; i--) {
+        message msg = message_list[i];
+        vector<uint32_t> recipient_subscription_list_tokens =
+            current_session->subscription_list_tokens;
+
+        for (int j = 0; i < recipient_subscription_list_tokens.size(); j++) {
+            uint32_t recipient_subscription_token =
+                recipient_subscription_list_tokens[j];
+            session *sesh = find_session_by_token(recipient_subscription_token);
+            if (sesh != NULL && !strcmp(msg.poster, sesh->client_id)) {
+                clear_send_buffer();
+                char *payload = send_buffer + header_size;
+                snprintf(payload, sizeof(send_buffer) - header_size, "<%s>%s",
+                         sesh->client_id, msg.content);
+
+                send_buffer_header->opcode = OPCODE_RETRIEVE_ACK;
+                send_buffer_header->payload_len = strlen(payload);
+                send_buffer_header->message_id = 0;
+
+                send_send_buffer(header_size);
+                num_messages_sent++;
+            }
+        }
+    }
+
+    clear_send_buffer();
+    send_buffer_header->opcode = OPCODE_END_RETRIEVE_ACK;
+    send_buffer_header->payload_len = 0;
+    send_buffer_header->message_id = 0;
+    send_send_buffer(header_size);
+}
+
+void handle_subscribe() {
+    if (current_session->state != STATE_ONLINE) {
+        send_reset(current_session);
+        return;
+    }
+
+    char *subscription_id = recv_buffer + header_size;
+
+    char *newline = strchr(subscription_id, '\n');
+    *newline = '\0';
+
+    u_int32_t token = find_token_by_client_id(subscription_id);
+    if (token != 0) {
+        current_session->subscription_list_tokens.push_back(token);
+        send_buffer_header->opcode = OPCODE_SUCCESSFUL_SUBSCRIBE_ACK;
+    } else {
+        send_buffer_header->opcode = OPCODE_FAILED_SUBSCRIBE_ACK;
+    }
+    send_send_buffer(header_size);
+}
+
+void handle_unsubscribe() {
+    if (current_session->state != STATE_ONLINE) {
+        send_reset(current_session);
+        return;
+    }
+
+    char *unsubscription_id = recv_buffer + header_size;
+
+    char *newline = strchr(unsubscription_id, '\n');
+    *newline = '\0';
+
+    u_int32_t token = find_token_by_client_id(unsubscription_id);
+    if (token != 0) {
+        vector<uint32_t>::iterator token_position =
+            find(current_session->subscription_list_tokens.begin(),
+                 current_session->subscription_list_tokens.end(), token);
+        if (token_position != current_session->subscription_list_tokens.end()) {
+            current_session->subscription_list_tokens.erase(token_position);
+
+            send_buffer_header->opcode = OPCODE_SUCCESSFUL_UNSUBSCRIBE_ACK;
+        } else {
+            send_buffer_header->opcode = OPCODE_FAILED_UNSUBSCRIBE_ACK;
+        }
+    } else {
+        send_buffer_header->opcode = OPCODE_FAILED_UNSUBSCRIBE_ACK;
+    }
+    send_send_buffer(header_size);
+}
+
+// Taken from:
+// https://stackoverflow.com/a/7622902
+uint32_t generate_random_token() {
+    uint32_t token = rand() & 0xff;
+    token |= (rand() & 0xff) << 8;
+    token |= (rand() & 0xff) << 16;
+    token |= (rand() & 0xff) << 24;
+    return token;
 }
 
 int parse_network_event() {
@@ -144,7 +412,7 @@ int parse_network_event() {
 }
 
 int identify_sessions(char *user_id, char *password) {
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i <= 2; i++) {
         if (strcmp(master_sessions[i].client_id, user_id) == 0 &&
             strcmp(master_sessions[i].password, password) == 0) {
             return i;
@@ -167,7 +435,6 @@ int main() {
 
     // This current_session is a variable temporarily hold the session upon
     // an event.
-    session *current_session;
 
     socket_file_descriptor = socket(AF_INET, SOCK_DGRAM, 0);
     if (socket_file_descriptor < 0) {
@@ -212,112 +479,61 @@ int main() {
         // current state of the session referred.
 
         uint32_t token = recv_buffer_header->token;
-        // This is the current session we are working with.
         current_session = find_session_by_token(token);
-        // if (current_session == NULL) {
-        //     printf("Invalid token received!\n");
-        //     continue;
-        // }
         int event = parse_network_event();
 
-        // Record the last time that this session is active.
-        current_session->last_time = time(NULL);
-
-        if (event == EVENT_NET_LOGIN) {
-            // For a login message, the current_session should be NULL and
-            // the token is 0. For other messages, they should be valid.
-
-            char *id_password = recv_buffer + header_size;
-
-            char *ampersand = strchr(id_password, '&');
-            char *password = ampersand + 1;
-            *ampersand = '\0';  // Add a null terminator
-            // Note that this null terminator can break the user ID
-            // and the password without allocating other buffers.
-            char *user_id = id_password;
-
-            char *newline = strchr(password, '\n');
-            *newline = '\0';  // Add a null terminator
-            // Note that since we did not process it on the client side,
-            // and since it is always typed by a user, there must be a
-            // trailing new line. We just write a null terminator on this
-            // place to terminate the password string.
-
-            // The server need to reply a msg anyway, and this reply msg
-            // contains only the header
-            send_buffer_header->payload_len = 0;
-            send_buffer_header->message_id = 0;
-
-            int master_session_index = identify_sessions(user_id, password);
-            if (master_session_index > -1) {
-                send_buffer_header->opcode = OPCODE_SUCCESSFUL_LOGIN_ACK;
-                send_buffer_header->token = generate_a_random_token();
-
-                cs = find_this_client_in_the_session_array();
-                cs->state = ONLINE;
-                cs->token = send_buffer_header->token;
-                cs->last_time = right_now();
-                cs->client_addr = client_address;
-
-            } else {
-                send_buffer_header->opcode = OPCODE_FAILED_LOGIN_ACK;
-                send_buffer_header->token = 0;
-            }
-
-            sendto(socket_file_descriptor, send_buffer, header_size, 0,
-                   (struct sockaddr *)&client_address, sizeof(client_address));
-
-        } else if (event == EVENT_NET_POST) {
-            // TODO: Check the state of the client that sends this post msg,
-            // i.e., check cs->state.
-
-            // Now we assume it is ONLINE, because I do not want to ident
-            // the following code in another layer.
-
-            for
-                each target session subscribed to this publisher {
-                    char *text = recv_buffer + header_size;
-                    char *payload = send_buffer + header_size;
-
-                    // This formatting the "<client_a>some_text" in the payload
-                    // of the forward msg, and hence, the client does not need
-                    // to format it, i.e., the client can just print it out.
-                    snprintf(payload, sizeof(send_buffer) - header_size,
-                             "<%s>%s", cs->client_id, text);
-
-                    int m = strlen(payload);
-
-                    // "target" is the session structure of the target client.
-                    target->state = STATE_MSG_FORWARD;
-
-                    send_buffer_header->magic1 = MAGIC_1;
-                    send_buffer_header->magic2 = MAGIC_2;
-                    send_buffer_header->opcode = OPCODE_FORWARD;
-                    send_buffer_header->payload_len = m;
-                    send_buffer_header->message_id =
-                        0;  // Note that I didn't use message_id here.
-
-                    sendto(socket_file_descriptor, send_buffer, header_size, 0,
-                           (struct sockaddr *)&target->client_addr,
-                           sizeof(target->client_addr));
-                }
-
-            // TODO: send back the post ack to this publisher.
-
-            // TODO: put the posted text line into a global list.
-
-        } else if (event == ...) {
-            // TODO: process other events
+        if (current_session == NULL && event != EVENT_NET_LOGIN) {
+            printf("Invalid token received!\n");
+            continue;
         }
 
-        time_t current_time = time();
+        if (current_session != NULL) {
+            uint32_t client_token = recv_buffer_header->token;
+            if (!is_valid_token(client_token)) {
+                send_reset(current_session);
+                continue;
+            }
+        }
 
+        if (event == EVENT_NET_LOGIN) {
+            handle_login_event();
+        } else if (event == EVENT_NET_POST) {
+            handle_post_event();
+        } else if (event == EVENT_NET_LOGOUT) {
+            handle_logout_event();
+        } else if (event == EVENT_NET_FORWARD_ACK) {
+            handle_forward_ack();
+        } else if (event == EVENT_NET_RETRIEVE) {
+            handle_retrieve();
+        } else if (event == EVENT_NET_SUBSCRIBE) {
+            handle_subscribe();
+        } else if (event == EVENT_NET_UNSUBSCRIBE) {
+            handle_unsubscribe();
+        } else if (event == EVENT_NET_RESET) {
+            send_reset(current_session);
+        } else if (event == EVENT_NET_INVALID) {
+            printf("Invalid network event!\n");
+            continue;
+        }
+
+        if (current_session != NULL) {
+            current_session->last_time = time(NULL);
+        }
         // Now you may check the time of clients, i.e., scan all sessions.
         // For each session, if the current time has passed 5 minutes plus
         // the last time of the session, the session expires.
         // TODO: check session liveliness
 
-    }  // This is the end of the while loop
+        for (int i = 0; i <= 2; i++) {
+            session *sesh = &master_sessions[i];
+            if (sesh->state != STATE_OFFLINE &&
+                difftime(time(NULL), sesh->last_time) > 300) {
+                printf("Client with id %s timed out.\n", sesh->client_id);
+
+                send_reset(sesh);
+            }
+        }
+    }
 
     return 0;
-}  // This is the end of main()
+}
