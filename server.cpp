@@ -16,14 +16,14 @@ using namespace std;
 struct header {
     char magic1;
     char magic2;
-    char opcode;
-    char payload_len;
+    unsigned char opcode;
+    unsigned char payload_len;
 
     uint32_t token;
     uint32_t message_id;
 };
 
-const int header_size = sizeof(struct header);
+#define header_size (sizeof(struct header))
 
 #define MAGIC_1 'R'
 #define MAGIC_2 'S'
@@ -160,12 +160,43 @@ void send_reset(session *sesh) {
 
 bool is_valid_token(uint32_t token) { return current_session->token == token; }
 
-void handle_login_event() {
-    char *id_password = recv_buffer + header_size;
+int identify_sessions(char *user_id, char *password) {
+    for (int i = 0; i <= 2; i++) {
+        if (strcmp(master_sessions[i].client_id, user_id) == 0 &&
+            strcmp(master_sessions[i].password, password) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
 
+// Taken from:
+// https://stackoverflow.com/a/7622902
+uint32_t generate_random_token() {
+    srand(time(NULL));
+    uint32_t token = rand() & 0xff;
+    token |= (rand() & 0xff) << 8;
+    token |= (rand() & 0xff) << 16;
+    token |= (rand() & 0xff) << 24;
+    return token;
+}
+
+void handle_login_event() {
+    //printf("Enter handle login event\n");
+    char *id_password = recv_buffer + header_size;
+    // printf("opcode is 0x%hhx\n", *(recv_buffer + header_size));
+    // printf("id and password is %s\n", id_password);
     char *ampersand = strchr(id_password, '&');
+    if (ampersand == NULL) {
+        printf("null\n");
+    }
     char *password = ampersand + 1;
+    // printf("About to put null terminator\n");
+    // printf("%p\n", ampersand);
+
     *ampersand = '\0';  // Add a null terminator
+    //printf("Put null terminator\n");
+
     // Note that this null terminator can break the user ID
     // and the password without allocating other buffers.
     char *user_id = id_password;
@@ -205,6 +236,7 @@ void handle_login_event() {
     send_buffer_header->message_id = 0;
 
     send_send_buffer(header_size);
+    //printf("Exit handle login event\n");
 }
 
 void handle_post_event() {
@@ -378,16 +410,6 @@ void handle_unsubscribe() {
     send_send_buffer(header_size);
 }
 
-// Taken from:
-// https://stackoverflow.com/a/7622902
-uint32_t generate_random_token() {
-    uint32_t token = rand() & 0xff;
-    token |= (rand() & 0xff) << 8;
-    token |= (rand() & 0xff) << 16;
-    token |= (rand() & 0xff) << 24;
-    return token;
-}
-
 int parse_network_event() {
     switch (recv_buffer_header->opcode) {
         case OPCODE_RESET:
@@ -411,15 +433,6 @@ int parse_network_event() {
     }
 }
 
-int identify_sessions(char *user_id, char *password) {
-    for (int i = 0; i <= 2; i++) {
-        if (strcmp(master_sessions[i].client_id, user_id) == 0 &&
-            strcmp(master_sessions[i].password, password) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
 int main() {
     // You may need to use a std::map to hold all the sessions to find a
     // session given a token. I just use an array just for demonstration.
@@ -469,6 +482,12 @@ int main() {
             (struct sockaddr *)&client_address,  // client address
             &client_address_length);  // length of client address structure
 
+        // printf("recv length is %d\n", recv_length);
+        // printf("address of recv buffer is %p\n", recv_buffer);
+        // printf("address of recv buffer header is %p\n", recv_buffer_header);
+        // printf("address of recv buffer header magicno1 is %p\n", &recv_buffer_header->magic1);
+        //printf("payload is %c\n", (char*) recv_buffer + 1);
+        //printf("first magicno is %c\n", *(recv_buffer_header + 1));
         if (recv_length <= 0) {
             printf("recvfrom() error: %s.\n", strerror(errno));
             return -1;

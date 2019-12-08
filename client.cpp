@@ -7,12 +7,13 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <time.h>
 
 struct header {
     char magic1;
     char magic2;
-    char opcode;
-    char payload_len;
+    unsigned char opcode;
+    unsigned char payload_len;
 
     uint32_t token;
     uint32_t message_id;
@@ -91,8 +92,27 @@ struct header *send_buffer_header = (struct header *)send_buffer;
 struct header *recv_buffer_header = (struct header *)recv_buffer;
 
 void state_error(char *custom_message) {
-    printf(custom_message);
+    printf("%s", custom_message);
     printf("Error: State is currently %d\n", state);
+}
+
+void send_send_buffer(int num_bytes) {
+    //printf("payload is %s\n", send_buffer + header_size);
+    sleep(1);
+    sendto(socket_file_descriptor, send_buffer, num_bytes, 0,
+           (struct sockaddr *)&server_address, sizeof(server_address));
+}
+
+void clear_send_buffer() {
+    memset(&send_buffer, 0, sizeof(send_buffer));
+    send_buffer_header->magic1 = MAGIC_1;
+    send_buffer_header->magic2 = MAGIC_2;
+}
+
+void clear_recv_buffer() {
+    memset(&recv_buffer, 0, sizeof(recv_buffer));
+    recv_buffer_header->magic1 = MAGIC_1;
+    recv_buffer_header->magic2 = MAGIC_2;
 }
 
 void send_reset() {
@@ -160,10 +180,6 @@ int parse_network_event(char *recv_buffer) {
             return EVENT_NET_INVALID;
     }
 }
-void send_send_buffer(int num_bytes) {
-    sendto(socket_file_descriptor, send_buffer, num_bytes, 0,
-           (struct sockaddr *)&server_address, sizeof(server_address));
-}
 
 void send_login_message(char *user_input) {
     char *id_password = user_input + 6;  // skip the "login#"
@@ -174,7 +190,10 @@ void send_login_message(char *user_input) {
     send_buffer_header->token = 0;
     send_buffer_header->message_id = 0;
 
-    memcpy(send_buffer_header + header_size, id_password, id_password_length);
+    //printf("header size is %d\n", header_size);
+    memcpy(send_buffer + header_size, id_password, id_password_length);
+    //printf("id pword length is %d\n", id_password_length);
+    //printf("id pword is %s\n", id_password);
     send_send_buffer(header_size + id_password_length);
 }
 
@@ -217,9 +236,9 @@ void send_unsubscribe_message(char *user_input) {
     send_send_buffer(header_size + client_id_length);
 }
 void send_retrieve_message(char *user_input) {
-    char* newline = strchr(user_input, '\n');
+    char *newline = strchr(user_input, '\n');
     *newline = '\0';
-    
+
     char *num_messages_string = user_input + strlen("retrieve#");
     int num_messages = atoi(num_messages_string);
 
@@ -247,18 +266,6 @@ void send_forward_ack() {
     send_send_buffer(header_size);
 }
 
-void clear_send_buffer() {
-    memset(&send_buffer, 0, sizeof(send_buffer));
-    send_buffer_header->magic1 = MAGIC_1;
-    send_buffer_header->magic2 = MAGIC_2;
-}
-
-void clear_recv_buffer() {
-    memset(&recv_buffer, 0, sizeof(recv_buffer));
-    recv_buffer_header->magic1 = MAGIC_1;
-    recv_buffer_header->magic2 = MAGIC_2;
-}
-
 int main() {
     FD_ZERO(&read_set);
     socket_file_descriptor = socket(AF_INET, SOCK_DGRAM, 0);
@@ -275,12 +282,14 @@ int main() {
     memset(&my_address, 0, sizeof(my_address));
     my_address.sin_family = AF_INET;
     my_address.sin_addr.s_addr = inet_addr("127.0.0.1");
-    my_address.sin_port = htons(41000 + rand() % 1000);
-
+    srand(time(NULL));
+    int rand_port = 41000 + rand() % 1000;
+    my_address.sin_port = htons(rand_port);
+    printf("random port is %d\n", rand_port);
     returned = bind(socket_file_descriptor, (struct sockaddr *)&my_address,
                     sizeof(my_address));
     if (returned < 0) {
-        printf("binding error!!!");
+        printf("binding error!!!\n");
     }
 
     maximum_file_descriptor =
@@ -308,7 +317,7 @@ int main() {
         if (FD_ISSET(fileno(stdin), &read_set)) {
             fgets(user_input, sizeof(user_input), stdin);
             event = parse_user_event(user_input);
-            printf("Event number is: %d\n", event);
+            //printf("Event number is: %d\n", event);
 
             if (event == EVENT_USER_LOGIN) {
                 if (state == STATE_OFFLINE) {
@@ -462,8 +471,7 @@ int main() {
                 }
             } else if (event == EVENT_NET_RESET) {
                 send_reset();
-            }
-            else if (event == EVENT_NET_INVALID) {
+            } else if (event == EVENT_NET_INVALID) {
                 printf("Invalid network event!\n");
             }
         }
