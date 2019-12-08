@@ -283,9 +283,7 @@ int main() {
     my_address.sin_family = AF_INET;
     my_address.sin_addr.s_addr = inet_addr("127.0.0.1");
     srand(time(NULL));
-    int rand_port = 41000 + rand() % 1000;
-    my_address.sin_port = htons(rand_port);
-    printf("random port is %d\n", rand_port);
+    my_address.sin_port = htons(41000 + rand() % 1000);
     returned = bind(socket_file_descriptor, (struct sockaddr *)&my_address,
                     sizeof(my_address));
     if (returned < 0) {

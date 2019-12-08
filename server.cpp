@@ -126,6 +126,7 @@ session *find_session_by_token(uint32_t token) {
     // } else {
     //     return NULL;
     // }
+    //printf("token is %d\n", token);
     for (int i = 0; i <= 2; i++) {
         if (master_sessions[i].token == token) {
             return &master_sessions[i];
@@ -182,7 +183,7 @@ uint32_t generate_random_token() {
 }
 
 void handle_login_event() {
-    //printf("Enter handle login event\n");
+    // printf("Enter handle login event\n");
     char *id_password = recv_buffer + header_size;
     // printf("opcode is 0x%hhx\n", *(recv_buffer + header_size));
     // printf("id and password is %s\n", id_password);
@@ -195,7 +196,7 @@ void handle_login_event() {
     // printf("%p\n", ampersand);
 
     *ampersand = '\0';  // Add a null terminator
-    //printf("Put null terminator\n");
+    // printf("Put null terminator\n");
 
     // Note that this null terminator can break the user ID
     // and the password without allocating other buffers.
@@ -218,12 +219,12 @@ void handle_login_event() {
             return;
         }
 
+        send_buffer_header->opcode = OPCODE_SUCCESSFUL_LOGIN_ACK;
+        send_buffer_header->token = generate_random_token();
+
         current_session->state = STATE_ONLINE;
         current_session->token = send_buffer_header->token;
         current_session->client_addr = client_address;
-
-        send_buffer_header->opcode = OPCODE_SUCCESSFUL_LOGIN_ACK;
-        send_buffer_header->token = generate_random_token();
 
     } else {
         current_session = NULL;
@@ -236,7 +237,7 @@ void handle_login_event() {
     send_buffer_header->message_id = 0;
 
     send_send_buffer(header_size);
-    //printf("Exit handle login event\n");
+    // printf("Exit handle login event\n");
 }
 
 void handle_post_event() {
@@ -485,9 +486,10 @@ int main() {
         // printf("recv length is %d\n", recv_length);
         // printf("address of recv buffer is %p\n", recv_buffer);
         // printf("address of recv buffer header is %p\n", recv_buffer_header);
-        // printf("address of recv buffer header magicno1 is %p\n", &recv_buffer_header->magic1);
-        //printf("payload is %c\n", (char*) recv_buffer + 1);
-        //printf("first magicno is %c\n", *(recv_buffer_header + 1));
+        // printf("address of recv buffer header magicno1 is %p\n",
+        // &recv_buffer_header->magic1);
+        // printf("payload is %c\n", (char*) recv_buffer + 1);
+        // printf("first magicno is %c\n", *(recv_buffer_header + 1));
         if (recv_length <= 0) {
             printf("recvfrom() error: %s.\n", strerror(errno));
             return -1;
