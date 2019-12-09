@@ -100,9 +100,6 @@ int recv_length;
 socklen_t client_address_length;
 session *current_session;
 
-// TODO: You may need to add more structures to hold global information
-// such as all registered clients, the list of all posted messages, etc.
-// Initially all sessions are in the OFFLINE state.
 void clear_send_buffer() {
     memset(&send_buffer, 0, sizeof(send_buffer));
     send_buffer_header->magic1 = MAGIC_1;
@@ -121,12 +118,6 @@ void send_send_buffer(int num_bytes) {
 }
 
 session *find_session_by_token(uint32_t token) {
-    // if (session_map.find(token) != session_map.end()) {
-    //     return &session_map[token];
-    // } else {
-    //     return NULL;
-    // }
-    // printf("token is %d\n", token);
     for (int i = 0; i <= 2; i++) {
         if (master_sessions[i].token == token) {
             return &master_sessions[i];
@@ -183,34 +174,21 @@ uint32_t generate_random_token() {
 }
 
 void handle_login_event() {
-    // printf("Enter handle login event\n");
     char *id_password = recv_buffer + header_size;
-    // printf("opcode is 0x%hhx\n", *(recv_buffer + header_size));
-    // printf("id and password is %s\n", id_password);
+
     char *ampersand = strchr(id_password, '&');
     if (ampersand == NULL) {
         printf("null\n");
     }
     char *password = ampersand + 1;
-    // printf("About to put null terminator\n");
-    // printf("%p\n", ampersand);
 
     *ampersand = '\0';  // Add a null terminator
-    // printf("Put null terminator\n");
 
-    // Note that this null terminator can break the user ID
-    // and the password without allocating other buffers.
     char *user_id = id_password;
 
     char *newline = strchr(password, '\n');
     *newline = '\0';  // Add a null terminator
-    // Note that since we did not process it on the client side,
-    // and since it is always typed by a user, there must be a
-    // trailing new line. We just write a null terminator on this
-    // place to terminate the password string.
 
-    // The server need to reply a msg anyway, and this reply msg
-    // contains only the header
     int master_session_index = identify_sessions(user_id, password);
     if (master_session_index > -1) {
         current_session = &master_sessions[master_session_index];
@@ -251,7 +229,7 @@ void handle_post_event() {
 
     char *newline = strchr(text, '\n');
     *newline = '\0';
-    // printf("Added null terminator\n");
+
     for (int i = 0; i <= 2; i++) {
         session *target_session = &master_sessions[i];
         vector<uint32_t> target_session_subscription_list_tokens =
@@ -291,17 +269,11 @@ void handle_post_event() {
     send_buffer_header->message_id = 0;
     send_send_buffer(header_size);
 
-    // printf("sent buffer\n");
-    // printf("text is %s\n", text);
     message msg;
     strcpy(msg.content, text);
-    // printf("copied content\n");
     strcpy(msg.poster, current_session->client_id);
-    // printf("copied client id");
 
-    // printf("prepared msg\n");
     message_list.push_back(msg);
-    // printf("Exit post event handler\n");
 }
 
 void handle_logout_event() {
@@ -330,7 +302,6 @@ void handle_forward_ack() {
 }
 
 void handle_retrieve() {
-    // printf("enter retrieve\n");
     if (current_session->state != STATE_ONLINE) {
         send_reset(current_session);
         return;
@@ -361,7 +332,6 @@ void handle_retrieve() {
 
                 send_send_buffer(header_size + strlen(payload));
                 num_messages_sent++;
-                // printf("One message sent\n");
             }
         }
     }
@@ -371,7 +341,6 @@ void handle_retrieve() {
     send_buffer_header->payload_len = 0;
     send_buffer_header->message_id = 0;
     send_send_buffer(header_size);
-    // printf("exit retrieve\n");
 }
 
 void handle_subscribe() {
@@ -448,20 +417,12 @@ int parse_network_event() {
 }
 
 int main() {
-    // You may need to use a std::map to hold all the sessions to find a
-    // session given a token. I just use an array just for demonstration.
-    // Assume we are dealing with at most 16 clients, and this array of
-    // the session structure is essentially our user database.
-
     strcpy(master_sessions[0].client_id, "user1");
     strcpy(master_sessions[1].client_id, "user2");
     strcpy(master_sessions[2].client_id, "user3");
     strcpy(master_sessions[0].password, "password1");
     strcpy(master_sessions[1].password, "password2");
     strcpy(master_sessions[2].password, "password3");
-
-    // This current_session is a variable temporarily hold the session upon
-    // an event.
 
     socket_file_descriptor = socket(AF_INET, SOCK_DGRAM, 0);
     if (socket_file_descriptor < 0) {
@@ -479,12 +440,8 @@ int main() {
     bind(socket_file_descriptor, (struct sockaddr *)&server_address,
          sizeof(server_address));
 
-    // Same as that in the client code.
 
     while (1) {
-        // Note that the program will still block on recvfrom()
-        // You may call select() only on this socket file descriptor with
-        // a timeout, or set a timeout using the socket options.
         clear_send_buffer();
         clear_recv_buffer();
         client_address_length = sizeof(client_address);
@@ -496,21 +453,10 @@ int main() {
             (struct sockaddr *)&client_address,  // client address
             &client_address_length);  // length of client address structure
 
-        // printf("recv length is %d\n", recv_length);
-        // printf("address of recv buffer is %p\n", recv_buffer);
-        // printf("address of recv buffer header is %p\n", recv_buffer_header);
-        // printf("address of recv buffer header magicno1 is %p\n",
-        // &recv_buffer_header->magic1);
-        // printf("payload is %c\n", (char*) recv_buffer + 1);
-        // printf("first magicno is %c\n", *(recv_buffer_header + 1));
         if (recv_length <= 0) {
             printf("recvfrom() error: %s.\n", strerror(errno));
             return -1;
         }
-
-        // Now we know there is an event from the network
-        // TODO: Figure out which event and process it according to the
-        // current state of the session referred.
 
         uint32_t token = recv_buffer_header->token;
         current_session = find_session_by_token(token);
@@ -559,16 +505,15 @@ int main() {
         } else if (event == EVENT_NET_UNSUBSCRIBE) {
             handle_unsubscribe();
         } else if (event == EVENT_NET_RESET) {
-            send_reset(current_session);
+            current_session->state = STATE_OFFLINE;
+            current_session->token = 0;
+            printf("Session of client with id %s destroyed.\n",
+                   current_session->client_id);
+            continue;
         } else if (event == EVENT_NET_INVALID) {
             printf("Invalid network event!\n");
             continue;
         }
-
-        // Now you may check the time of clients, i.e., scan all sessions.
-        // For each session, if the current time has passed 5 minutes plus
-        // the last time of the session, the session expires.
-        // TODO: check session liveliness
     }
 
     return 0;

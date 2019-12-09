@@ -91,13 +91,9 @@ fd_set read_set;
 struct header *send_buffer_header = (struct header *)send_buffer;
 struct header *recv_buffer_header = (struct header *)recv_buffer;
 
-void state_error(char *custom_message) {
-    printf("%s", custom_message);
-    //printf("Error: State is currently %d\n", state);
-}
+void state_error(char *custom_message) { printf("%s", custom_message); }
 
 void send_send_buffer(int num_bytes) {
-    // printf("payload is %s\n", send_buffer + header_size);
     sendto(socket_file_descriptor, send_buffer, num_bytes, 0,
            (struct sockaddr *)&server_address, sizeof(server_address));
 }
@@ -147,7 +143,6 @@ int parse_user_event(char *user_input) {
     }
 }
 
-// todo: state transitions
 int parse_network_event(char *recv_buffer) {
     header *received_header = (header *)recv_buffer;
     switch (received_header->opcode) {
@@ -189,10 +184,7 @@ void send_login_message(char *user_input) {
     send_buffer_header->token = 0;
     send_buffer_header->message_id = 0;
 
-    // printf("header size is %d\n", header_size);
     memcpy(send_buffer + header_size, id_password, id_password_length);
-    // printf("id pword length is %d\n", id_password_length);
-    // printf("id pword is %s\n", id_password);
     send_send_buffer(header_size + id_password_length);
 }
 
@@ -314,7 +306,6 @@ int main() {
         if (FD_ISSET(fileno(stdin), &read_set)) {
             fgets(user_input, sizeof(user_input), stdin);
             event = parse_user_event(user_input);
-            // printf("Event number is: %d\n", event);
 
             if (event == EVENT_USER_LOGIN) {
                 if (state == STATE_OFFLINE) {
@@ -362,16 +353,6 @@ int main() {
             } else if (event == EVENT_USER_INVALID) {
                 printf("Invalid user event!\n");
             }
-            //     else if (event == EVENT_USER_RESET) {
-            //     // TODO: You may add another command like "reset#" so as to
-            //     // facilitate testing. In this case, a user just need to
-            //     // type this line to generate a reset message.
-
-            //     // You can add more commands as you like to help debugging.
-            //     // For example, I can add a command "state#" to instruct the
-            //     // client program to print the current state without chang
-            //     // -ing anything.
-            // }
         }
         clear_recv_buffer();
         clear_send_buffer();
@@ -380,7 +361,7 @@ int main() {
                             sizeof(recv_buffer), 0);
 
             event = parse_network_event(recv_buffer);
-            // todo: state transitions
+
             if (event == EVENT_NET_LOGIN_SUCCESSFUL) {
                 if (state == STATE_LOGIN_SENT) {
                     token = recv_buffer_header->token;
@@ -474,10 +455,5 @@ int main() {
                 printf("Invalid network event!\n");
             }
         }
-
-        // Now we finished processing the pending event. Just go back to the
-        // beginning of the loop and waiting for another event.
-        // Note that you can set a timeout for the select() function
-        // to allow it to return regularly and check timeout related events.
     }
 }
