@@ -81,8 +81,8 @@ struct session {
 
 struct message {
     int message_id;
-    char *content;
-    char *poster;
+    char content[900];
+    char poster[900];
 };
 
 vector<message> message_list;
@@ -126,7 +126,7 @@ session *find_session_by_token(uint32_t token) {
     // } else {
     //     return NULL;
     // }
-    //printf("token is %d\n", token);
+    // printf("token is %d\n", token);
     for (int i = 0; i <= 2; i++) {
         if (master_sessions[i].token == token) {
             return &master_sessions[i];
@@ -241,6 +241,7 @@ void handle_login_event() {
 }
 
 void handle_post_event() {
+    // printf("Enter post event handler\n");
     if (current_session->state != STATE_ONLINE) {
         send_reset(current_session);
         return;
@@ -250,6 +251,7 @@ void handle_post_event() {
 
     char *newline = strchr(text, '\n');
     *newline = '\0';
+    // printf("Added null terminator\n");
     for (int i = 0; i <= 2; i++) {
         session *target_session = &master_sessions[i];
         vector<uint32_t> target_session_subscription_list_tokens =
@@ -275,11 +277,13 @@ void handle_post_event() {
             send_buffer_header->message_id =
                 0;  // Note that I didn't use message_id here.
 
-            sendto(socket_file_descriptor, send_buffer, header_size, 0,
+            sendto(socket_file_descriptor, send_buffer,
+                   header_size + strlen(payload) + 1, 0,
                    (struct sockaddr *)&target_session->client_addr,
                    sizeof(target_session->client_addr));
         }
     }
+    // printf("sent forward messages\n");
 
     clear_send_buffer();
     send_buffer_header->opcode = OPCODE_POST_ACK;
@@ -287,11 +291,17 @@ void handle_post_event() {
     send_buffer_header->message_id = 0;
     send_send_buffer(header_size);
 
+    // printf("sent buffer\n");
+    // printf("text is %s\n", text);
     message msg;
     strcpy(msg.content, text);
+    // printf("copied content\n");
     strcpy(msg.poster, current_session->client_id);
+    // printf("copied client id");
 
+    // printf("prepared msg\n");
     message_list.push_back(msg);
+    // printf("Exit post event handler\n");
 }
 
 void handle_logout_event() {
@@ -320,6 +330,7 @@ void handle_forward_ack() {
 }
 
 void handle_retrieve() {
+    // printf("enter retrieve\n");
     if (current_session->state != STATE_ONLINE) {
         send_reset(current_session);
         return;
@@ -334,7 +345,7 @@ void handle_retrieve() {
         vector<uint32_t> recipient_subscription_list_tokens =
             current_session->subscription_list_tokens;
 
-        for (int j = 0; i < recipient_subscription_list_tokens.size(); j++) {
+        for (int j = 0; j < recipient_subscription_list_tokens.size(); j++) {
             uint32_t recipient_subscription_token =
                 recipient_subscription_list_tokens[j];
             session *sesh = find_session_by_token(recipient_subscription_token);
@@ -348,8 +359,9 @@ void handle_retrieve() {
                 send_buffer_header->payload_len = strlen(payload);
                 send_buffer_header->message_id = 0;
 
-                send_send_buffer(header_size);
+                send_send_buffer(header_size + strlen(payload));
                 num_messages_sent++;
+                // printf("One message sent\n");
             }
         }
     }
@@ -359,6 +371,7 @@ void handle_retrieve() {
     send_buffer_header->payload_len = 0;
     send_buffer_header->message_id = 0;
     send_send_buffer(header_size);
+    // printf("exit retrieve\n");
 }
 
 void handle_subscribe() {
@@ -513,7 +526,22 @@ int main() {
             if (!is_valid_token(client_token)) {
                 send_reset(current_session);
                 continue;
+            } else if (current_session->state != STATE_OFFLINE &&
+                       difftime(time(NULL), current_session->last_time) > 30) {
+                printf("Client with id %s timed out.\n",
+                       current_session->client_id);
+
+                send_reset(current_session);
+                continue;
             }
+        }
+
+        if (current_session != NULL) {
+            current_session->last_time = time(NULL);
+        }
+
+        for (int i = 0; i <= 2; i++) {
+            session *sesh = &master_sessions[i];
         }
 
         if (event == EVENT_NET_LOGIN) {
@@ -537,23 +565,10 @@ int main() {
             continue;
         }
 
-        if (current_session != NULL) {
-            current_session->last_time = time(NULL);
-        }
         // Now you may check the time of clients, i.e., scan all sessions.
         // For each session, if the current time has passed 5 minutes plus
         // the last time of the session, the session expires.
         // TODO: check session liveliness
-
-        for (int i = 0; i <= 2; i++) {
-            session *sesh = &master_sessions[i];
-            if (sesh->state != STATE_OFFLINE &&
-                difftime(time(NULL), sesh->last_time) > 300) {
-                printf("Client with id %s timed out.\n", sesh->client_id);
-
-                send_reset(sesh);
-            }
-        }
     }
 
     return 0;

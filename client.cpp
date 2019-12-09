@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <unistd.h>
 #include <time.h>
+#include <unistd.h>
 
 struct header {
     char magic1;
@@ -93,12 +93,11 @@ struct header *recv_buffer_header = (struct header *)recv_buffer;
 
 void state_error(char *custom_message) {
     printf("%s", custom_message);
-    printf("Error: State is currently %d\n", state);
+    //printf("Error: State is currently %d\n", state);
 }
 
 void send_send_buffer(int num_bytes) {
-    //printf("payload is %s\n", send_buffer + header_size);
-    sleep(1);
+    // printf("payload is %s\n", send_buffer + header_size);
     sendto(socket_file_descriptor, send_buffer, num_bytes, 0,
            (struct sockaddr *)&server_address, sizeof(server_address));
 }
@@ -118,7 +117,7 @@ void clear_recv_buffer() {
 void send_reset() {
     state = STATE_OFFLINE;
     token = 0;
-    printf("Session destroyed due to unexpected state.\n");
+    printf("Session destroyed.\n");
 
     send_buffer_header->opcode = OPCODE_RESET;
     send_buffer_header->payload_len = 0;
@@ -190,10 +189,10 @@ void send_login_message(char *user_input) {
     send_buffer_header->token = 0;
     send_buffer_header->message_id = 0;
 
-    //printf("header size is %d\n", header_size);
+    // printf("header size is %d\n", header_size);
     memcpy(send_buffer + header_size, id_password, id_password_length);
-    //printf("id pword length is %d\n", id_password_length);
-    //printf("id pword is %s\n", id_password);
+    // printf("id pword length is %d\n", id_password_length);
+    // printf("id pword is %s\n", id_password);
     send_send_buffer(header_size + id_password_length);
 }
 
@@ -315,7 +314,7 @@ int main() {
         if (FD_ISSET(fileno(stdin), &read_set)) {
             fgets(user_input, sizeof(user_input), stdin);
             event = parse_user_event(user_input);
-            //printf("Event number is: %d\n", event);
+            // printf("Event number is: %d\n", event);
 
             if (event == EVENT_USER_LOGIN) {
                 if (state == STATE_OFFLINE) {
@@ -329,7 +328,7 @@ int main() {
                     send_post_message(user_input);
                     state = STATE_POST_SENT;
                 } else {
-                    state_error("Not yet online! ");
+                    state_error("Cannot post; not yet online!\n");
                 }
 
             } else if (event == EVENT_USER_SUBSCRIBE) {
@@ -337,28 +336,28 @@ int main() {
                     send_subscribe_message(user_input);
                     state = STATE_SUBSCRIBE_SENT;
                 } else {
-                    state_error("Not yet online! ");
+                    state_error("Not yet online!\n");
                 }
             } else if (event == EVENT_USER_UNSUBSCRIBE) {
                 if (state == STATE_ONLINE) {
                     send_unsubscribe_message(user_input);
                     state = STATE_UNSUBSCRIBE_SENT;
                 } else {
-                    state_error("Not yet online! ");
+                    state_error("Not yet online!\n");
                 }
             } else if (event == EVENT_USER_RETRIEVE) {
                 if (state == STATE_ONLINE) {
                     send_retrieve_message(user_input);
                     state = STATE_RETRIEVE_SENT;
                 } else {
-                    state_error("Not yet online! ");
+                    state_error("Not yet online!\n");
                 }
             } else if (event == EVENT_USER_LOGOUT) {
                 if (state == STATE_ONLINE) {
                     send_logout_message();
                     state = STATE_LOGOUT_SENT;
                 } else {
-                    state_error("Not yet online! ");
+                    state_error("Not yet online!\n");
                 }
             } else if (event == EVENT_USER_INVALID) {
                 printf("Invalid user event!\n");
@@ -468,7 +467,9 @@ int main() {
                     send_reset();
                 }
             } else if (event == EVENT_NET_RESET) {
-                send_reset();
+                state = STATE_OFFLINE;
+                token = 0;
+                printf("Session destroyed.\n");
             } else if (event == EVENT_NET_INVALID) {
                 printf("Invalid network event!\n");
             }
